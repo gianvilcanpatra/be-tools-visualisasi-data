@@ -97,27 +97,25 @@ class ApiVisualizationController extends Controller
      * Save a new visualization
      */
     public function saveVisualization(Request $request)
-        {
-            try {
-                // Validate basic fields
-                $validated = $request->validate([
-                    'id_canvas' => 'nullable|integer',
-                    'id_datasource' => 'integer',
-                    'name' => 'string',
-                    'visualization_type' => 'required|string',
-                    'query' => 'string',
-                    'config' => 'nullable|array',
-                    'width' => 'nullable',
-                    'height' => 'nullable',
-                    'position_x' => 'nullable',
-                    'position_y' => 'nullable',
-                    'builder_payload' => 'nullable|array',
+    {
+        try {
+            // Validate basic fields
+            $validated = $request->validate([
+                'id_canvas' => 'nullable|integer',
+                'id_datasource' => 'integer',
+                'name' => 'string',
+                'visualization_type' => 'required|string',
+                'query' => 'string',
+                'config' => 'nullable|array',
+                'width' => 'nullable',
+                'height' => 'nullable',
+                'position_x' => 'nullable',
+                'position_y' => 'nullable',
+                'builder_payload' => 'nullable|array',
             ]);
 
             // Extract and prepare config data
             $configInput = $request->input('config', []);
-            // Extract and prepare config data
-            $configInput = $request->input('config', []);
 
             // Ensure all config values are properly captured
             $visualizationConfig = [
@@ -125,21 +123,7 @@ class ApiVisualizationController extends Controller
                 'colors' => $configInput['colors'] ?? ['#4CAF50', '#FF9800', '#2196F3'],
                 'backgroundColor' => $configInput['backgroundColor'] ?? '#ffffff',
                 'pattern' => $configInput['pattern'] ?? 'solid', // Chart pattern (e.g., for bar fills)
-            // Ensure all config values are properly captured
-            $visualizationConfig = [
-                // General Chart Aesthetics
-                'colors' => $configInput['colors'] ?? ['#4CAF50', '#FF9800', '#2196F3'],
-                'backgroundColor' => $configInput['backgroundColor'] ?? '#ffffff',
-                'pattern' => $configInput['pattern'] ?? 'solid', // Chart pattern (e.g., for bar fills)
 
-                // Main Title
-                'title' => $configInput['title'] ?? $validated['name'], // Default to visualization name if not provided
-                'titleFontSize' => $configInput['titleFontSize'] ?? 18,
-                'titleFontColor' => $configInput['titleFontColor'] ?? '#333333',
-                'titleFontFamily' => $configInput['titleFontFamily'] ?? 'Arial',
-                'titlePosition' => $configInput['titlePosition'] ?? 'center', // e.g., 'left', 'center', 'right'
-                'titleBackgroundColor' => $configInput['titleBackgroundColor'] ?? '#ffffff',
-                'titleFontStyle' => $configInput['titleFontStyle'] ?? 'normal', // e.g., 'normal', 'italic', 'bold'
                 // Main Title
                 'title' => $configInput['title'] ?? $validated['name'], // Default to visualization name if not provided
                 'titleFontSize' => $configInput['titleFontSize'] ?? 18,
@@ -157,19 +141,7 @@ class ApiVisualizationController extends Controller
                 'subtitlePosition' => $configInput['subtitlePosition'] ?? 'center',
                 'subtitleBackgroundColor' => $configInput['subtitleBackgroundColor'] ?? '#ffffff',
                 'subtitleTextStyle' => $configInput['subtitleTextStyle'] ?? 'normal',
-                // Subtitle
-                'subtitle' => $configInput['subtitle'] ?? '', // Default to empty if not provided
-                'subtitleFontSize' => $configInput['subtitleFontSize'] ?? 14,
-                'subtitleFontFamily' => $configInput['subtitleFontFamily'] ?? 'Arial',
-                'subtitleFontColor' => $configInput['subtitleFontColor'] ?? '#333333',
-                'subtitlePosition' => $configInput['subtitlePosition'] ?? 'center',
-                'subtitleBackgroundColor' => $configInput['subtitleBackgroundColor'] ?? '#ffffff',
-                'subtitleTextStyle' => $configInput['subtitleTextStyle'] ?? 'normal',
 
-                // Legend (using 'fontSize', 'fontFamily', 'fontColor' as per original naming for these specific legend properties)
-                'fontSize' => $configInput['fontSize'] ?? 14,       // Legend Font Size
-                'fontFamily' => $configInput['fontFamily'] ?? 'Arial',   // Legend Font Family
-                'fontColor' => $configInput['fontColor'] ?? '#000000',    // Legend Font Color
                 // Legend (using 'fontSize', 'fontFamily', 'fontColor' as per original naming for these specific legend properties)
                 'fontSize' => $configInput['fontSize'] ?? 14,       // Legend Font Size
                 'fontFamily' => $configInput['fontFamily'] ?? 'Arial',   // Legend Font Family
@@ -178,14 +150,7 @@ class ApiVisualizationController extends Controller
                 // Grid
                 'gridColor' => $configInput['gridColor'] ?? '#E0E0E0',
                 'gridType' => $configInput['gridType'] ?? 'solid', // e.g., 'solid', 'dashed', 'dotted'
-                // Grid
-                'gridColor' => $configInput['gridColor'] ?? '#E0E0E0',
-                'gridType' => $configInput['gridType'] ?? 'solid', // e.g., 'solid', 'dashed', 'dotted'
 
-                // X-Axis Label/Text
-                'xAxisFontSize' => $configInput['xAxisFontSize'] ?? 12,
-                'xAxisFontFamily' => $configInput['xAxisFontFamily'] ?? 'Arial',
-                'xAxisFontColor' => $configInput['xAxisFontColor'] ?? '#000000',
                 // X-Axis Label/Text
                 'xAxisFontSize' => $configInput['xAxisFontSize'] ?? 12,
                 'xAxisFontFamily' => $configInput['xAxisFontFamily'] ?? 'Arial',
@@ -195,19 +160,7 @@ class ApiVisualizationController extends Controller
                 'yAxisFontSize' => $configInput['yAxisFontSize'] ?? 12,
                 'yAxisFontFamily' => $configInput['yAxisFontFamily'] ?? 'Arial',
                 'yAxisFontColor' => $configInput['yAxisFontColor'] ?? '#000000',
-                // Y-Axis Label/Text
-                'yAxisFontSize' => $configInput['yAxisFontSize'] ?? 12,
-                'yAxisFontFamily' => $configInput['yAxisFontFamily'] ?? 'Arial',
-                'yAxisFontColor' => $configInput['yAxisFontColor'] ?? '#000000',
 
-                // X-Axis Title (Category Axis Title)
-                'categoryTitle' => $configInput['categoryTitle'] ?? 'Kategori',
-                'categoryTitleFontSize' => $configInput['categoryTitleFontSize'] ?? 14,
-                'categoryTitleFontFamily' => $configInput['categoryTitleFontFamily'] ?? 'Arial',
-                'categoryTitleFontColor' => $configInput['categoryTitleFontColor'] ?? '#000000',
-                'categoryTitlePosition' => $configInput['categoryTitlePosition'] ?? 'center',
-                'categoryTitleBackgroundColor' => $configInput['categoryTitleBackgroundColor'] ?? '#ffffff',
-                'categoryTitleTextStyle' => $configInput['categoryTitleTextStyle'] ?? 'normal',
                 // X-Axis Title (Category Axis Title)
                 'categoryTitle' => $configInput['categoryTitle'] ?? 'Kategori',
                 'categoryTitleFontSize' => $configInput['categoryTitleFontSize'] ?? 14,
@@ -222,83 +175,73 @@ class ApiVisualizationController extends Controller
                 'valuePosition' => $configInput['valuePosition'] ?? 'top', // e.g., 'top', 'center', 'bottom', 'inside'
                 'valueFontColor' => $configInput['valueFontColor'] ?? '#000000',
                 'valueOrientation' => $configInput['valueOrientation'] ?? 'horizontal', // e.g., 'horizontal', 'vertical'
-                // Value Labels (on data points)
-                'showValue' => $configInput['showValue'] ?? true,
-                'valuePosition' => $configInput['valuePosition'] ?? 'top', // e.g., 'top', 'center', 'bottom', 'inside'
-                'valueFontColor' => $configInput['valueFontColor'] ?? '#000000',
-                'valueOrientation' => $configInput['valueOrientation'] ?? 'horizontal', // e.g., 'horizontal', 'vertical'
 
                 // Chart Border
                 'borderColor' => $configInput['borderColor'] ?? '#000000',
                 'borderWidth' => $configInput['borderWidth'] ?? 1,
                 'borderType' => $configInput['borderType'] ?? 'solid', // e.g., 'solid', 'dashed'
             ];
-                // Chart Border
-                'borderColor' => $configInput['borderColor'] ?? '#000000',
-                'borderWidth' => $configInput['borderWidth'] ?? 1,
-                'borderType' => $configInput['borderType'] ?? 'solid', // e.g., 'solid', 'dashed'
-            ];
 
-                // If visualizationOptions exists in the input config, merge it.
-                // This is for chart-specific options that don't fit the general structure.
-                if (isset($configInput['visualizationOptions']) && is_array($configInput['visualizationOptions'])) {
-                    $visualizationConfig['visualizationOptions'] = $configInput['visualizationOptions'];
-                }
+            // If visualizationOptions exists in the input config, merge it.
+            // This is for chart-specific options that don't fit the general structure.
+            if (isset($configInput['visualizationOptions']) && is_array($configInput['visualizationOptions'])) {
+                $visualizationConfig['visualizationOptions'] = $configInput['visualizationOptions'];
+            }
 
-                // Try to find existing visualization first by canvas ID and query
-                $visualization = null;
+            // Try to find existing visualization first by canvas ID and query
+            $visualization = null;
+            if ($request->has('id_canvas')) {
+                $visualization = Visualization::where('id_canvas', $validated['id_canvas'])
+                    ->where('query', $validated['query'])
+                    ->first();
+            }
+
+            // Check if this is a position/size update only
+            $isPositionUpdate = $request->has('position_x') || $request->has('position_y') ||
+                $request->has('width') || $request->has('height');
+
+            if ($visualization) {
+                $updateData = [
+                    'modified_by' => 1, // Replace with auth user ID
+                    'modified_time' => now(),
+                ];
+
+                // Only update id_canvas if explicitly provided
                 if ($request->has('id_canvas')) {
-                    $visualization = Visualization::where('id_canvas', $validated['id_canvas'])
-                        ->where('query', $validated['query'])
-                        ->first();
+                    $updateData['id_canvas'] = $validated['id_canvas'];
                 }
 
-                // Check if this is a position/size update only
-                $isPositionUpdate = $request->has('position_x') || $request->has('position_y') ||
-                    $request->has('width') || $request->has('height');
+                // Only update these fields if explicitly provided
+                if ($request->has('id_datasource')) {
+                    $updateData['id_datasource'] = $validated['id_datasource'];
+                }
 
-                if ($visualization) {
-                    $updateData = [
-                        'modified_by' => 1, // Replace with auth user ID
-                        'modified_time' => now(),
-                    ];
+                if ($request->has('name')) {
+                    $updateData['name'] = $validated['name'];
+                }
 
-                    // Only update id_canvas if explicitly provided
-                    if ($request->has('id_canvas')) {
-                        $updateData['id_canvas'] = $validated['id_canvas'];
-                    }
+                if ($request->has('visualization_type')) {
+                    $updateData['visualization_type'] = $validated['visualization_type'];
+                }
 
-                    // Only update these fields if explicitly provided
-                    if ($request->has('id_datasource')) {
-                        $updateData['id_datasource'] = $validated['id_datasource'];
-                    }
+                // If this is not just a position update, update the config and query
+                if (!$isPositionUpdate) {
+                    $updateData['config'] = $visualizationConfig;
+                    $updateData['query'] = $validated['query'];
+                }
 
-                    if ($request->has('name')) {
-                        $updateData['name'] = $validated['name'];
-                    }
+                // Always update position and size if provided
+                if ($request->has('width')) {
+                    $updateData['width'] = $validated['width'];
+                }
 
-                    if ($request->has('visualization_type')) {
-                        $updateData['visualization_type'] = $validated['visualization_type'];
-                    }
+                if ($request->has('height')) {
+                    $updateData['height'] = $validated['height'];
+                }
 
-                    // If this is not just a position update, update the config and query
-                    if (!$isPositionUpdate) {
-                        $updateData['config'] = $visualizationConfig;
-                        $updateData['query'] = $validated['query'];
-                    }
-
-                    // Always update position and size if provided
-                    if ($request->has('width')) {
-                        $updateData['width'] = $validated['width'];
-                    }
-
-                    if ($request->has('height')) {
-                        $updateData['height'] = $validated['height'];
-                    }
-
-                    if ($request->has('position_x')) {
-                        $updateData['position_x'] = $validated['position_x'];
-                    }
+                if ($request->has('position_x')) {
+                    $updateData['position_x'] = $validated['position_x'];
+                }
 
                 if ($request->has('position_y')) {
                     $updateData['position_y'] = $validated['position_y'];
@@ -316,10 +259,6 @@ class ApiVisualizationController extends Controller
                 $logMessage = $isPositionUpdate ?
                     'visualization position/size updated' :
                     'visualization fully updated';
-                // Log the operation type
-                $logMessage = $isPositionUpdate ?
-                    'visualization position/size updated' :
-                    'visualization fully updated';
 
                 Log::info($logMessage, [
                     'visualization_id' => $visualization->id,
@@ -337,48 +276,26 @@ class ApiVisualizationController extends Controller
                         'message' => 'id_canvas is required for creating new visualization'
                     ], 422);
                 }
-                Log::info($logMessage, [
-                    'visualization_id' => $visualization->id,
-                    'name' => $visualization->name,
-                    'position_x' => $visualization->position_x,
-                    'position_y' => $visualization->position_y,
-                    'width' => $visualization->width,
-                    'height' => $visualization->height
-                ]);
-            } else {
-                // For creating new visualization, id_canvas is required
-                if (!$request->has('id_canvas')) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'id_canvas is required for creating new visualization'
-                    ], 422);
-                }
 
-                    // Create new visualization with all data
-                    $visualization = Visualization::create([
-                        'id_canvas' => $validated['id_canvas'],
-                        'id_datasource' => $validated['id_datasource'],
-                        'name' => $validated['name'],
-                        'visualization_type' => $validated['visualization_type'],
-                        'query' => $validated['query'],
-                        'config' => $visualizationConfig,
-                        'width' => $validated['width'] ?? 800,
-                        'height' => $validated['height'] ?? 350,
-                        'position_x' => $validated['position_x'] ?? 0,
-                        'position_y' => $validated['position_y'] ?? 0,
-                        'created_time' => now(),
-                        'modified_time' => now(),
-                        'created_by' => 1, // Replace with auth user ID
-                        'modified_by' => 1, // Replace with auth user ID
+                // Create new visualization with all data
+                $visualization = Visualization::create([
+                    'id_canvas' => $validated['id_canvas'],
+                    'id_datasource' => $validated['id_datasource'],
+                    'name' => $validated['name'],
+                    'visualization_type' => $validated['visualization_type'],
+                    'query' => $validated['query'],
+                    'config' => $visualizationConfig,
+                    'width' => $validated['width'] ?? 800,
+                    'height' => $validated['height'] ?? 350,
+                    'position_x' => $validated['position_x'] ?? 0,
+                    'position_y' => $validated['position_y'] ?? 0,
+                    'created_time' => now(),
+                    'modified_time' => now(),
+                    'created_by' => 1, // Replace with auth user ID
+                    'modified_by' => 1, // Replace with auth user ID
                     'builder_payload' => $validated['builder_payload'] ?? null,
-                    ]);
-
-                Log::info('New visualization created', [
-                    'visualization_id' => $visualization->id,
-                    'name' => $visualization->name,
-                    'visualization_type' => $visualization->visualization_type
                 ]);
-            }
+
                 Log::info('New visualization created', [
                     'visualization_id' => $visualization->id,
                     'name' => $visualization->name,
@@ -402,30 +319,7 @@ class ApiVisualizationController extends Controller
                 'trace' => $e->getTraceAsString(),
                 'request' => $request->all()
             ]);
-            return response()->json([
-                'success' => true,
-                'message' => 'Visualisasi berhasil disimpan',
-                'data' => $visualization
-            ], 200);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validasi gagal',
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            Log::error('Error saving visualization: ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString(),
-                'request' => $request->all()
-            ]);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Terjadi kesalahan saat menyimpan visualization',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat menyimpan visualization',
