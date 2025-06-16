@@ -1,0 +1,33 @@
+# Laravel/PHP files dari src
+src/.phpunit.cache
+src/node_modules
+src/public/build
+src/public/hot
+src/public/storage
+src/storage/*.key
+src/storage/pail
+src/vendor
+src/.env
+src/.env.backup
+src/.env.production
+src/.phpactor.json
+src/.phpunit.result.cache
+src/Homestead.json
+src/Homestead.yaml
+src/npm-debug.log
+src/yarn-error.log
+src/auth.json
+src/.fleet
+src/.idea
+src/.nova
+src/.vscode
+src/.zed
+
+# Docker files (jika ada yang perlu di-ignore)
+docker/logs/
+docker/data/
+
+# General
+.DS_Store
+Thumbs.db
+*.log

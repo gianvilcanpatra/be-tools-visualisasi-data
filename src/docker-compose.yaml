@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - DB_HOST=34.101.242.165
+      - DB_DATABASE=tugas-akhir
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=KoTA110_TA
+      - DB_CONNECTION=pgsql
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./storage:/var/www/storage
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: tugas-akhir
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: KoTA110_TA
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
