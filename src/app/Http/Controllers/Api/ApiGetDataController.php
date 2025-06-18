@@ -10,119 +10,129 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Query\Expression;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Schema;
 
 class ApiGetDataController extends Controller
 {
     private $warehouseConnectionName = 'pgsql2';
+    private $schemaMetadata = null;
 
-    private function getPrimaryKeyForTable($tableName)
+    private function _getSchemaMetadata()
     {
-        try {
-            $pkQuery = "SELECT kcu.column_name
-                        FROM information_schema.table_constraints AS tc
-                        JOIN information_schema.key_column_usage AS kcu
-                          ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-                        WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = 'public' AND tc.table_name = ?";
+        if ($this->schemaMetadata !== null) {
+            return $this->schemaMetadata;
+        }
+
+        $connection = DB::connection($this->warehouseConnectionName);
+        $schema = 'public';
+
+        $columnsResult = $connection->select("SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = ? ORDER BY table_name, ordinal_position", [$schema]);
+        $tableColumns = [];
+        foreach ($columnsResult as $col) {
+            $tableColumns[strtolower($col->table_name)][] = strtolower($col->column_name);
+        }
+
+        $pkResult = $connection->select("SELECT tc.table_name, kcu.column_name FROM information_schema.table_constraints AS tc JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = ?", [$schema]);
+        $primaryKeys = [];
+        foreach ($pkResult as $pk) {
+            $primaryKeys[strtolower($pk->table_name)] = strtolower($pk->column_name);
+        }
+        
+        $fkResult = $connection->select("SELECT tc.table_name AS referencing_table, kcu.column_name AS referencing_column, ccu.table_name AS referenced_table, ccu.column_name AS referenced_column FROM information_schema.table_constraints AS tc JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = ?", [$schema]);
+        
+        $this->schemaMetadata = [
+            'tableColumns' => $tableColumns,
+            'primaryKeys' => $primaryKeys,
+            'foreignKeys' => array_map(function($fk) {
+                $fk->referencing_table = strtolower($fk->referencing_table);
+                $fk->referencing_column = strtolower($fk->referencing_column);
+                $fk->referenced_table = strtolower($fk->referenced_table);
+                $fk->referenced_column = strtolower($fk->referenced_column);
+                return $fk;
+            }, $fkResult)
+        ];
+
+        return $this->schemaMetadata;
+    }
+
+    private function getForeignKey($tableA, $tableB, $metadata)
+    {
+        $tableA = strtolower($tableA);
+        $tableB = strtolower($tableB);
+
+        foreach ($metadata['foreignKeys'] as $fk) {
+            if (($fk->referencing_table === $tableA && $fk->referenced_table === $tableB) ||
+                ($fk->referencing_table === $tableB && $fk->referenced_table === $tableA)) {
+                return $fk;
+            }
+        }
+        
+        $pkOfA = $metadata['primaryKeys'][$tableA] ?? null;
+        if ($pkOfA && isset($metadata['tableColumns'][$tableB]) && in_array($pkOfA, $metadata['tableColumns'][$tableB])) {
+            return (object) [
+                'referencing_table' => $tableB, 'referencing_column' => $pkOfA,
+                'referenced_table' => $tableA, 'referenced_column' => $pkOfA
+            ];
+        }
+
+        $pkOfB = $metadata['primaryKeys'][$tableB] ?? null;
+        if ($pkOfB && isset($metadata['tableColumns'][$tableA]) && in_array($pkOfB, $metadata['tableColumns'][$tableA])) {
+            return (object) [
+                'referencing_table' => $tableA, 'referencing_column' => $pkOfB,
+                'referenced_table' => $tableB, 'referenced_column' => $pkOfB
+            ];
+        }
+
+        return null;
+    }
+    
+    public function getJoinableTables(Request $request)
+    {
+        $validated = $request->validate(['existing_tables' => 'present|array']);
+        $existingTables = array_unique($validated['existing_tables']);
+        
+        $metadata = $this->_getSchemaMetadata();
+        $allTablesInWarehouse = array_keys($metadata['tableColumns']);
+
+        if (empty($existingTables)) {
+            return response()->json(['success' => true, 'data' => $allTablesInWarehouse]);
+        }
+
+        $lastSelectedTable = Arr::last($existingTables);
+        if (!$lastSelectedTable) {
+             return response()->json(['success' => true, 'data' => $allTablesInWarehouse]);
+        }
+        
+        $joinableTables = [];
+        foreach ($allTablesInWarehouse as $candidateTable) {
+            if (strtolower($candidateTable) === strtolower($lastSelectedTable)) continue;
+
+            if ($this->getForeignKey($lastSelectedTable, $candidateTable, $metadata)) {
+                $joinableTables[] = $candidateTable;
+            }
+        }
+        
+        $finalList = array_unique(array_merge($existingTables, $joinableTables));
+        
+        $lastTablePrefix = explode('__', $lastSelectedTable)[0];
+        
+        usort($finalList, function ($a, $b) use ($lastTablePrefix, $lastSelectedTable) {
+            if ($a === $lastSelectedTable) return 1;
+            if ($b === $lastSelectedTable) return -1;
+
+            $aMatchesPrefix = (explode('__', $a)[0] === $lastTablePrefix);
+            $bMatchesPrefix = (explode('__', $b)[0] === $lastTablePrefix);
+
+            if ($aMatchesPrefix && !$bMatchesPrefix) return -1;
+            if (!$aMatchesPrefix && $bMatchesPrefix) return 1;
             
-            $result = DB::connection($this->warehouseConnectionName)->selectOne($pkQuery, [$tableName]);
-            return $result ? $result->column_name : null;
-        } catch (\Exception $e) {
-            Log::error("Could not get primary key for table {$tableName}: " . $e->getMessage());
-            return null;
-        }
+            return strcasecmp($a, $b);
+        });
+        
+        return response()->json(['success' => true, 'data' => $finalList]);
     }
 
-    private function getForeignKey($tableA, $tableB)
-    {
-        try {
-            $connection = DB::connection($this->warehouseConnectionName);
-            $schema = 'public';
-
-            // Metode 1: Cek foreign key formal (gold standard)
-            $formalFkQuery = "
-                SELECT
-                    tc.table_name AS referencing_table, kcu.column_name AS referencing_column,
-                    ccu.table_name AS referenced_table, ccu.column_name AS referenced_column
-                FROM information_schema.table_constraints AS tc
-                JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-                JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-                WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = ?
-                  AND ((lower(tc.table_name) = lower(?) AND lower(ccu.table_name) = lower(?)) OR (lower(tc.table_name) = lower(?) AND lower(ccu.table_name) = lower(?)))
-            ";
-            $formalForeignKey = $connection->selectOne($formalFkQuery, [$schema, $tableA, $tableB, $tableB, $tableA]);
-            if ($formalForeignKey) {
-                return $formalForeignKey;
-            }
-
-            // Metode 2 (FALLBACK): Cek relasi berdasarkan nama Primary Key
-            $schemaManager = Schema::connection($this->warehouseConnectionName);
-            $columnsA = array_map('strtolower', $schemaManager->getColumnListing($tableA));
-            $columnsB = array_map('strtolower', $schemaManager->getColumnListing($tableB));
-
-            // Cek 1: Apakah PK dari Tabel A ada sebagai kolom di Tabel B?
-            $pkOfA = $this->getPrimaryKeyForTable($tableA);
-            if ($pkOfA && in_array(strtolower($pkOfA), $columnsB)) {
-                $result = new \stdClass();
-                $result->referencing_table = $tableB;
-                $result->referencing_column = $pkOfA;
-                $result->referenced_table = $tableA;
-                $result->referenced_column = $pkOfA;
-                return $result;
-            }
-
-            // Cek 2: Apakah PK dari Tabel B ada sebagai kolom di Tabel A?
-            $pkOfB = $this->getPrimaryKeyForTable($tableB);
-            if ($pkOfB && in_array(strtolower($pkOfB), $columnsA)) {
-                $result = new \stdClass();
-                $result->referencing_table = $tableA;
-                $result->referencing_column = $pkOfB;
-                $result->referenced_table = $tableB;
-                $result->referenced_column = $pkOfB;
-                return $result;
-            }
-
-            return null;
-        } catch (\Exception $e) {
-            Log::error("Error finding foreign key between {$tableA} and {$tableB}: " . $e->getMessage());
-            return null;
-        }
-    }
-    
-    public function getAllTables()
-    {
-        try {
-            $tables = DB::connection($this->warehouseConnectionName)->select("
-                SELECT table_name
-                FROM information_schema.tables
-                WHERE table_schema = 'public'
-            ");
-            $excludedTables = ['migrations', 'personal_access_tokens'];
-            $tableNames = array_filter(array_map(fn($table) => $table->table_name, $tables), fn($tableName) => !in_array($tableName, $excludedTables));
-            return response()->json(['success' => true, 'message' => 'Daftar tabel berhasil diambil dari data warehouse.', 'data' => array_values($tableNames)], 200);
-        } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => 'Terjadi kesalahan saat mengambil daftar tabel dari data warehouse.', 'error' => $e->getMessage()], 500);
-        }
-    }
-
-    public function getTableColumns($table)
-    {
-        try {
-            $connection = DB::connection($this->warehouseConnectionName);
-            $tableExists = $connection->select("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ?", [$table]);
-            if (empty($tableExists)) {
-                return response()->json(['success' => false, 'message' => "Tabel '{$table}' tidak ditemukan di data warehouse."], 404);
-            }
-            $columns = $connection->select("SELECT column_name, data_type, is_nullable, ordinal_position FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ?", [$table]);
-            $formattedColumns = array_map(function ($column) {
-                return ['id' => $column->ordinal_position, 'name' => $column->column_name, 'type' => $column->data_type, 'nullable' => $column->is_nullable === 'YES'];
-            }, $columns);
-            return response()->json(['success' => true, 'message' => "Daftar kolom berhasil diambil dari tabel '{$table}'.", 'data' => $formattedColumns], 200);
-        } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => 'Terjadi kesalahan saat mengambil daftar kolom.', 'error' => $e->getMessage()], 500);
-        }
-    }
-    
     public function getTableDataByColumns(Request $request)
     {
         try {
@@ -135,9 +145,11 @@ class ApiGetDataController extends Controller
             $userInputDimensi = $request->input('dimensi', []);
             $metriks = $request->input('metriks', []);
             $tabelJoin = $request->input('tabel_join', []);
+            $metadata = null; 
 
             $previousTable = $table;
             if (!empty($tabelJoin)) {
+                $metadata = $this->_getSchemaMetadata();
                 foreach ($tabelJoin as $join) {
                     $joinTable = isset($join['tabel']) ? $join['tabel'] : null;
                     $joinType = strtoupper($join['join_type'] ?? 'INNER');
@@ -145,24 +157,18 @@ class ApiGetDataController extends Controller
                         if ($joinType === 'CROSS') {
                             $query->crossJoin($joinTable);
                         } else {
-                            $foreignKey = $this->getForeignKey($previousTable, $joinTable);
+                            $foreignKey = $this->getForeignKey($previousTable, $joinTable, $metadata);
                             if ($foreignKey) {
-                                $firstColumn = "{$foreignKey->referencing_table}.{$foreignKey->referencing_column}";
-                                $secondColumn = "{$foreignKey->referenced_table}.{$foreignKey->referenced_column}";
-                                $query->join($joinTable, $firstColumn, '=', $secondColumn, $joinType);
+                                $query->join($joinTable, "{$foreignKey->referencing_table}.{$foreignKey->referencing_column}", '=', "{$foreignKey->referenced_table}.{$foreignKey->referenced_column}", $joinType);
                             } else {
-                                return response()->json([
-                                    'success' => false,
-                                    'message' => "Foreign key relationship for join between {$previousTable} and {$joinTable} not found. Automatic join is not possible."
-                                ], 400);
+                                return response()->json(['success' => false, 'message' => "Foreign key not found for join between {$previousTable} and {$joinTable}."], 400);
                             }
                         }
                         $previousTable = $joinTable;
                     }
                 }
             }
-
-            // Sisa kode tidak perlu diubah
+            
             $filters = $request->input('filters', []);
             $granularity = $request->input('granularity');
             $dateFilterDetails = $request->input('date_filter_details');
@@ -228,179 +234,99 @@ class ApiGetDataController extends Controller
             $sqlForDebug = vsprintf(str_replace(['%', '?'], ['%%', "'%s'"], $query->toSql()), $query->getBindings());
             $data = $query->get();
             return response()->json(['success' => true, 'message' => 'Data berhasil di-query.', 'data' => $data, 'query' => $sqlForDebug], 200);
+
         } catch (\Exception $e) {
             Log::error("Error in getTableDataByColumns: " . $e->getMessage() . " Stack: " . $e->getTraceAsString() . (isset($sqlForDebug) ? " SQL: " . $sqlForDebug : ""));
             return response()->json(['success' => false, 'message' => 'Terjadi kesalahan saat mengambil data: ' . $e->getMessage(), 'error_detail' => $e->getMessage(), 'query_attempted' => isset($sqlForDebug) ? $sqlForDebug : 'Query not fully built or error before build'], 500);
         }
     }
 
+    public function getAllTables()
+    {
+        try {
+            $tables = DB::connection($this->warehouseConnectionName)->select("
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+            ");
+            $excludedTables = ['migrations', 'personal_access_tokens'];
+            $tableNames = array_filter(array_map(fn($table) => $table->table_name, $tables), fn($tableName) => !in_array($tableName, $excludedTables));
+            return response()->json(['success' => true, 'message' => 'Daftar tabel berhasil diambil dari data warehouse.', 'data' => array_values($tableNames)], 200);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Terjadi kesalahan saat mengambil daftar tabel dari data warehouse.', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function getTableColumns($table)
+    {
+        try {
+            $connection = DB::connection($this->warehouseConnectionName);
+            $tableExists = $connection->select("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ?", [$table]);
+            if (empty($tableExists)) {
+                return response()->json(['success' => false, 'message' => "Tabel '{$table}' tidak ditemukan di data warehouse."], 404);
+            }
+            $columns = $connection->select("SELECT column_name, data_type, is_nullable, ordinal_position FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ?", [$table]);
+            $formattedColumns = array_map(function ($column) {
+                return ['id' => $column->ordinal_position, 'name' => $column->column_name, 'type' => $column->data_type, 'nullable' => $column->is_nullable === 'YES'];
+            }, $columns);
+            return response()->json(['success' => true, 'message' => "Daftar kolom berhasil diambil dari tabel '{$table}'.", 'data' => $formattedColumns], 200);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Terjadi kesalahan saat mengambil daftar kolom.', 'error' => $e->getMessage()], 500);
+        }
+    }
+    
     private function getConnectionDetails($idDatasource)
     {
         $datasource = DB::table('datasources')->where('id_datasource', $idDatasource)->first();
-
-        if (!$datasource) {
-            throw new \Exception("Datasource dengan ID {$idDatasource} tidak ditemukan.");
-        }
-
-        return [
-            'driver'    => $datasource->type,
-            'host'      => $datasource->host,
-            'port'      => $datasource->port,
-            'database'  => $datasource->database_name,
-            'username'  => $datasource->username,
-            'password'  => $datasource->password,
-            'charset'   => 'utf8',
-            'collation' => 'utf8_unicode_ci',
-            'prefix'    => '',
-            'schema'    => 'public',
-        ];
-    }
-
-    public function getJoinableTables(Request $request)
-    {
-        $validated = $request->validate([
-            'existing_tables' => 'present|array'
-        ]);
-        
-        $existingTables = array_unique($validated['existing_tables']);
-
-        $allTablesInWarehouse = array_map(fn($table) => $table->table_name, DB::connection($this->warehouseConnectionName)->select("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"));
-
-        if (empty($existingTables)) {
-            return response()->json(['success' => true, 'data' => $allTablesInWarehouse]);
-        }
-
-        $joinableTables = [];
-        foreach ($allTablesInWarehouse as $candidateTable) {
-            if (in_array($candidateTable, $existingTables)) {
-                $joinableTables[] = $candidateTable;
-                continue;
-            }
-
-            foreach ($existingTables as $existingTable) {
-                if ($this->getForeignKey($candidateTable, $existingTable)) {
-                    $joinableTables[] = $candidateTable;
-                    break; 
-                }
-            }
-        }
-        
-        return response()->json(['success' => true, 'data' => array_unique($joinableTables)]);
+        if (!$datasource) throw new \Exception("Datasource dengan ID {$idDatasource} tidak ditemukan.");
+        return ['driver' => $datasource->type, 'host' => $datasource->host, 'port' => $datasource->port, 'database' => $datasource->database_name, 'username' => $datasource->username, 'password' => $datasource->password, 'charset' => 'utf8', 'collation' => 'utf8_unicode_ci', 'prefix' => '', 'schema' => 'public'];
     }
 
     public function executeQuery(Request $request)
     {
         try {
-            // Ambil query dari input JSON
             $query = $request->input('query');
-
-            // Validasi query untuk memastikan tidak kosong
-            if (empty($query)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Query SQL tidak boleh kosong.',
-                ], 400);
-            }
-
-            // Ambil koneksi database dari datasources (hardcoded untuk ID 1)
-            $idDatasource = 1; // Hardcode datasource ID 1
+            if (empty($query)) return response()->json(['success' => false, 'message' => 'Query SQL tidak boleh kosong.'], 400);
+            $idDatasource = 1;
             $dbConfig = $this->getConnectionDetails($idDatasource);
-
-            // Buat koneksi on-the-fly menggunakan konfigurasi yang sudah diambil
             config(["database.connections.dynamic" => $dbConfig]);
-
-            // Gunakan koneksi yang baru dibuat
             $connection = DB::connection('dynamic');
-
-            // Menjalankan query SQL yang diberikan
             $result = $connection->select($query);
-
-            // Mengembalikan hasil query
-            return response()->json([
-                'success' => true,
-                'message' => 'Query berhasil dijalankan.',
-                'data' => $result,
-            ], 200);
+            return response()->json(['success' => true, 'message' => 'Query berhasil dijalankan.', 'data' => $result], 200);
         } catch (\Exception $e) {
-            // Menangani error jika ada kesalahan saat menjalankan query
-            return response()->json([
-                'success' => false,
-                'message' => 'Terjadi kesalahan saat menjalankan query.',
-                'error' => $e->getMessage(),
-            ], 500);
+            return response()->json(['success' => false, 'message' => 'Terjadi kesalahan saat menjalankan query.', 'error' => $e->getMessage()], 500);
         }
     }
 
-
     public function applyFilters($query, $filters)
     {
-        try {
-            if (!is_array($filters) || empty($filters)) {
-                return $query;
-            }
-
-            $query->where(function ($q) use ($filters) {
-                foreach ($filters as $filter) {
-                    $column = $filter['column'] ?? null;
-                    $operator = strtolower($filter['operator'] ?? '=');
-                    $value = $filter['value'] ?? null;
-                    $logic = strtolower($filter['logic'] ?? 'and'); // and (default) atau or
-                    $mode = strtolower($filter['mode'] ?? 'include'); // include atau exclude
-
-                    if (!$column || !$value) {
-                        continue;
+        if (!is_array($filters) || empty($filters)) return $query;
+        $query->where(function ($q) use ($filters) {
+            foreach ($filters as $filter) {
+                $column = $filter['column'] ?? null;
+                $operator = strtolower($filter['operator'] ?? '=');
+                $value = $filter['value'] ?? null;
+                $logic = strtolower($filter['logic'] ?? 'and');
+                $mode = strtolower($filter['mode'] ?? 'include');
+                if (!$column || $value === null) continue;
+                if ($operator === 'between') {
+                    if (is_array($value) && count($value) === 2) {
+                        $method = ($mode === 'exclude') ? 'whereNotBetween' : 'whereBetween';
+                        if ($logic === 'or') $method = 'or' . ucfirst($method);
+                        $q->{$method}($column, $value);
                     }
-
-                    switch ($operator) {
-                        case 'like':
-                            $condition = [$column, 'LIKE', "%{$value}%"];
-                            break;
-
-                        case 'between':
-                            if (is_array($value) && count($value) === 2) {
-                                if ($mode === 'exclude') {
-                                    if ($logic === 'or') {
-                                        $q->orWhereNotBetween($column, $value);
-                                    } else {
-                                        $q->whereNotBetween($column, $value);
-                                    }
-                                } else {
-                                    if ($logic === 'or') {
-                                        $q->orWhereBetween($column, $value);
-                                    } else {
-                                        $q->whereBetween($column, $value);
-                                    }
-                                }
-                                continue 2;
-                            }
-                            continue 2;
-
-                        default:
-                            $condition = [$column, $operator, $value];
-                            break;
-                    }
-
+                } else {
+                    $condition = [$column, $operator, $value];
+                    if ($operator === 'like') $condition = [$column, 'LIKE', "%{$value}%"];
                     if ($mode === 'exclude') {
-                        if ($logic === 'or') {
-                            $q->orWhereNot(...$condition);
-                        } else {
-                            $q->whereNot(...$condition);
-                        }
+                        $logic === 'or' ? $q->orWhereNot(...$condition) : $q->whereNot(...$condition);
                     } else {
-                        if ($logic === 'or') {
-                            $q->orWhere(...$condition);
-                        } else {
-                            $q->where(...$condition);
-                        }
+                        $logic === 'or' ? $q->orWhere(...$condition) : $q->where(...$condition);
                     }
                 }
-            });
-
-            return $query;
-        } catch (\Exception $e) {
-            Log::error('Error in applyFilters: ' . $e->getMessage());
-            return $query;
-        }
+            }
+        });
+        return $query;
     }
 
     public function checkDateColumn(Request $request)
